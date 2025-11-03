@@ -53,9 +53,7 @@ async def movie_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Spell correction
     corrected = str(TextBlob(query).correct())
     if corrected.lower() != query.lower():
-        await update.message.reply_text(
-            f"🔍 Did you mean {corrected}?", parse_mode="Markdown"
-        )
+        await update.message.reply_text(f"🔍 Did you mean *{corrected}*?", parse_mode="Markdown")
         query = corrected
 
     # Fetch data from OMDb
@@ -67,8 +65,10 @@ async def movie_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         year = response.get("Year")
         rating = response.get("imdbRating")
         poster = response.get("Poster")
+        if poster == "N/A":
+            poster = None
 
-        text = f"🎬 {title} ({year})\n⭐ IMDb: {rating}"
+        text = f"🎬 *{title}* ({year})\n⭐ IMDb: {rating}"
 
         keyboard = [
             [
@@ -80,12 +80,19 @@ async def movie_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        await update.message.reply_photo(
-            photo=poster,
-            caption=text,
-            parse_mode="Markdown",
-            reply_markup=reply_markup,
-        )
+        if poster:
+            await update.message.reply_photo(
+                photo=poster,
+                caption=text,
+                parse_mode="Markdown",
+                reply_markup=reply_markup,
+            )
+        else:
+            await update.message.reply_text(
+                text,
+                parse_mode="Markdown",
+                reply_markup=reply_markup,
+            )
     else:
         await update.message.reply_text("❌ Movie not found. Try another name!")
 
@@ -102,5 +109,5 @@ def main():
     app.run_polling()
 
 
-if _name_ == __name__:
+if __name__ == "__main__":
     main()
