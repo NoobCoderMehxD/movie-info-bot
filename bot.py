@@ -11,9 +11,9 @@ from telegram.ext import (
 from textblob import TextBlob
 
 # === CONFIG ===
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # set in Render environment
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # from Render environment
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "YourUsername")  # without @
-OMDB_API_KEY = os.getenv("OMDB_API_KEY")  # get from https://www.omdbapi.com/apikey.aspx
+OMDB_API_KEY = os.getenv("OMDB_API_KEY")  # from https://www.omdbapi.com/apikey.aspx
 
 
 # === COMMAND HANDLERS ===
@@ -49,27 +49,40 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def movie_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle user movie queries"""
     query = update.message.text.strip()
+    print(f"🎬 Searching for movie: {query}")  # Debug log
 
-    # Spell correction
-    corrected = str(TextBlob(query).correct())
-    if corrected.lower() != query.lower():
-        await update.message.reply_text(f"🔍 Did you mean *{corrected}*?", parse_mode="Markdown")
-        query = corrected
-
-    # Fetch data from OMDb
+    # === Try original query first ===
     url = f"https://www.omdbapi.com/?t={query}&apikey={OMDB_API_KEY}"
     response = requests.get(url).json()
+    print("🔎 OMDb Response:", response)  # Debug log
 
+    # === If not found, try corrected spelling ===
+    if response.get("Response") != "True":
+        corrected = str(TextBlob(query).correct())
+        if corrected.lower() != query.lower():
+            print(f"🪄 Trying corrected spelling: {corrected}")
+            url = f"https://www.omdbapi.com/?t={corrected}&apikey={OMDB_API_KEY}"
+            response = requests.get(url).json()
+            print("🔎 Corrected Response:", response)
+            if response.get("Response") == "True":
+                await update.message.reply_text(
+                    f"🔍 Did you mean *{corrected}*?", parse_mode="Markdown"
+                )
+
+    # === Process OMDb response ===
     if response.get("Response") == "True":
-        title = response.get("Title")
-        year = response.get("Year")
-        rating = response.get("imdbRating")
-        poster = response.get("Poster")
-        if poster == "N/A":
+        title = response.get("Title", "Unknown")
+        year = response.get("Year", "N/A")
+        rating = response.get("imdbRating", "N/A")
+        poster = response.get("Poster", None)
+
+        # Handle missing posters
+        if not poster or poster == "N/A":
             poster = None
 
         text = f"🎬 *{title}* ({year})\n⭐ IMDb: {rating}"
 
+        # Inline button
         keyboard = [
             [
                 InlineKeyboardButton(
@@ -80,6 +93,7 @@ async def movie_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
+        # Send poster or fallback to text
         if poster:
             await update.message.reply_photo(
                 photo=poster,
@@ -93,19 +107,24 @@ async def movie_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown",
                 reply_markup=reply_markup,
             )
+
     else:
         await update.message.reply_text("❌ Movie not found. Try another name!")
 
 
 # === MAIN ===
 def main():
+    if not BOT_TOKEN or not OMDB_API_KEY:
+        print("⚠️ Missing environment variables! Please set BOT_TOKEN and OMDB_API_KEY.")
+        return
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, movie_info))
 
-    print("🤖 Bot started...")
+    print("🤖 Bot started and polling for updates...")
     app.run_polling()
 
 
