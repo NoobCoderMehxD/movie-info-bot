@@ -11,35 +11,29 @@ from telegram.ext import (
 from textblob import TextBlob
 
 # === CONFIG ===
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # from Render environment
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "YourUsername")  # without @
-OMDB_API_KEY = os.getenv("OMDB_API_KEY")  # from https://www.omdbapi.com/apikey.aspx
+TMDB_API_KEY = os.getenv("TMDB_API_KEY")  # get from https://www.themoviedb.org/settings/api
 
 
 # === COMMAND HANDLERS ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start message"""
     msg = (
         "👋 *Welcome to Movie Info Bot!*\n\n"
-        "🎬 Just send me any movie name and I’ll show:\n"
+        "🎬 Send any movie name (Telugu / Hindi / English) — I’ll show:\n"
         "• Poster\n"
         "• IMDb rating\n"
         "• Release year\n\n"
-        "📩 Use /help to learn more commands."
+        "📩 Use /help for more."
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Help message"""
     msg = (
-        "🆘 *Help Menu*\n\n"
-        "Here’s how to use this bot:\n"
-        "1️⃣ Type any movie name (e.g., Inception)\n"
-        "2️⃣ Get poster, IMDb rating, and release year\n"
-        "3️⃣ Tap the contact button to message the owner\n\n"
-        "💡 Example:\n"
-        "Avngers → the bot will auto-correct it to Avengers.\n\n"
+        "🆘 *Help*\n\n"
+        "Type any movie name (e.g., Pushpa, Inception, RRR)\n"
+        "and I’ll show its details.\n\n"
         "📩 Contact: [@{username}](https://t.me/{username})"
     ).format(username=OWNER_USERNAME)
     await update.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
@@ -47,75 +41,61 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # === MOVIE INFO HANDLER ===
 async def movie_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle user movie queries"""
     query = update.message.text.strip()
-    print(f"🎬 Searching for movie: {query}")  # Debug log
+    print(f"🎬 Searching for: {query}")
 
-    # === Try original query first ===
-    url = f"https://www.omdbapi.com/?t={query}&apikey={OMDB_API_KEY}"
-    response = requests.get(url).json()
-    print("🔎 OMDb Response:", response)  # Debug log
+    # Spell correction (optional)
+    corrected = str(TextBlob(query).correct())
+    if corrected.lower() != query.lower():
+        await update.message.reply_text(f"🔍 Did you mean *{corrected}*?", parse_mode="Markdown")
+        query = corrected
 
-    # === If not found, try corrected spelling ===
-    if response.get("Response") != "True":
-        corrected = str(TextBlob(query).correct())
-        if corrected.lower() != query.lower():
-            print(f"🪄 Trying corrected spelling: {corrected}")
-            url = f"https://www.omdbapi.com/?t={corrected}&apikey={OMDB_API_KEY}"
-            response = requests.get(url).json()
-            print("🔎 Corrected Response:", response)
-            if response.get("Response") == "True":
-                await update.message.reply_text(
-                    f"🔍 Did you mean *{corrected}*?", parse_mode="Markdown"
-                )
+    # === TMDb search ===
+    search_url = f"https://api.themoviedb.org/3/search/movie?api_key={TMDB_API_KEY}&query={query}&language=en-IN"
+    response = requests.get(search_url).json()
+    print("🔎 TMDb Response:", response)
 
-    # === Process OMDb response ===
-    if response.get("Response") == "True":
-        title = response.get("Title", "Unknown")
-        year = response.get("Year", "N/A")
-        rating = response.get("imdbRating", "N/A")
-        poster = response.get("Poster", None)
+    if response.get("results"):
+        movie = response["results"][0]  # Get top match
+        title = movie.get("title")
+        year = movie.get("release_date", "N/A")[:4]
+        rating = movie.get("vote_average", "N/A")
+        poster_path = movie.get("poster_path")
 
-        # Handle missing posters
-        if not poster or poster == "N/A":
-            poster = None
+        poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None
 
-        text = f"🎬 *{title}* ({year})\n⭐ IMDb: {rating}"
+        text = f"🎬 *{title}* ({year})\n⭐ Rating: {rating}/10"
 
-        # Inline button
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    f"📩 Contact @{OWNER_USERNAME}",
-                    url=f"https://t.me/{OWNER_USERNAME}?text={title}%20movie%20request",
-                )
-            ]
-        ]
+        keyboard = [[
+            InlineKeyboardButton(
+                f"📩 Contact @{OWNER_USERNAME}",
+                url=f"https://t.me/{OWNER_USERNAME}?text={title}%20movie%20info"
+            )
+        ]]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        # Send poster or fallback to text
-        if poster:
+        if poster_url:
             await update.message.reply_photo(
-                photo=poster,
+                photo=poster_url,
                 caption=text,
                 parse_mode="Markdown",
-                reply_markup=reply_markup,
+                reply_markup=reply_markup
             )
         else:
             await update.message.reply_text(
                 text,
                 parse_mode="Markdown",
-                reply_markup=reply_markup,
+                reply_markup=reply_markup
             )
 
     else:
-        await update.message.reply_text("❌ Movie not found. Try another name!")
+        await update.message.reply_text("❌ Movie not found. Try another name or correct spelling!")
 
 
 # === MAIN ===
 def main():
-    if not BOT_TOKEN or not OMDB_API_KEY:
-        print("⚠️ Missing environment variables! Please set BOT_TOKEN and OMDB_API_KEY.")
+    if not BOT_TOKEN or not TMDB_API_KEY:
+        print("⚠️ Missing environment variables! Set BOT_TOKEN and TMDB_API_KEY.")
         return
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -124,7 +104,7 @@ def main():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, movie_info))
 
-    print("🤖 Bot started and polling for updates...")
+    print("🤖 Bot started and polling...")
     app.run_polling()
 
 
